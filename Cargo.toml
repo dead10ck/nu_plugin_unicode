@@ -1,0 +1,41 @@
+[package]
+name = "nu_plugin_unicode"
+
+version = "0.1.0-alpha.1"
+edition = "2024"
+
+authors = ["Skyler Hawthorne <skyler@dead10ck.dev>"]
+description = "A utility for working with Unicode text"
+
+repository = "https://github.com/dead10ck/nu_plugin_unicode"
+license = "MPL-2.0"
+readme = "README.md"
+keywords = ["nu", "nushell", "plugin", "unicode"]
+categories = ["command-line-utilities"]
+exclude = [ ".github/" ]
+
+[package.metadata.release]
+allow-branch = [ "main" ]
+pre-release-hook = [ "./pre-release" ]
+
+[[bin]]
+name = "nu_plugin_unicode"
+bench = false
+
+[lib]
+bench = false
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+[dependencies]
+nu-plugin = "0.107.0"
+nu-protocol = "0.107.0"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
+
+[dev-dependencies]
+nu-plugin-test-support = "0.107.0"
+# nu-command = "0.107.0"
