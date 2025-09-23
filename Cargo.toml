@@ -30,8 +30,10 @@ codegen-units = 1
 lto = "thin"
 
 [dependencies]
+fst = "0.4.7"
 nu-plugin = "0.107.0"
 nu-protocol = "0.107.0"
+once_cell = "1.21.3"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }

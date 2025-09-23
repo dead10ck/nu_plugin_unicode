@@ -1,11 +1,63 @@
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
-use nu_protocol::{LabeledError, ListStream, PipelineData, Signature, Span, Type};
+use nu_protocol::{
+    IntoValue, LabeledError, ListStream, PipelineData, Signature, Span, Type, Value, record,
+};
 use tracing_subscriber::prelude::*;
 
-use crate::{Unicode, unicode::constants};
+use crate::{Unicode, ucd, unicode::constants};
 
 #[derive(Debug)]
 pub struct UnicodeChars;
+
+impl UnicodeChars {
+    pub(crate) fn run_impl(
+        &self,
+        _plugin: &Unicode,
+        _engine: &EngineInterface,
+        _call: &EvaluatedCall,
+        input: PipelineData,
+    ) -> Result<PipelineData, LabeledError> {
+        let _ = tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .with(tracing_subscriber::EnvFilter::from_default_env())
+            .try_init();
+
+        match input {
+            PipelineData::Value(val, _) => {
+                let result = match val {
+                    Value::String { val, .. } => val
+                        .chars()
+                        .map(|ch| {
+                            let name = ucd::NAMES.get(&ch).copied().into_value(Span::unknown());
+                            Value::record(record!("name" => name), Span::unknown())
+                        })
+                        .collect::<Vec<_>>()
+                        .into_value(Span::unknown()),
+                    val => {
+                        return Err(LabeledError::new("Invalid input")
+                            .with_label("Should be string or utf-8 bytes", val.span()));
+                    }
+                };
+                let result = PipelineData::Value(result, None);
+                tracing::trace!(phase = "return", ?result);
+                Ok(result)
+            }
+            PipelineData::ListStream(_stream, _) => {
+                todo!();
+                // let span = stream.span();
+
+                // Ok(PipelineData::ListStream(
+                //     ListStream::new(std::iter::empty(), span, engine.signals().clone()),
+                //     None,
+                // ))
+            }
+            data => Err(LabeledError::new("invalid input").with_label(
+                "Only values can be passed as input",
+                data.span().unwrap_or(Span::unknown()),
+            )),
+        }
+    }
+}
 
 impl PluginCommand for UnicodeChars {
     type Plugin = Unicode;
@@ -45,40 +97,5 @@ impl PluginCommand for UnicodeChars {
 
     fn search_terms(&self) -> Vec<&str> {
         vec!["unicode", "string"]
-    }
-}
-
-impl UnicodeChars {
-    pub(crate) fn run_impl(
-        &self,
-        _plugin: &Unicode,
-        engine: &EngineInterface,
-        _call: &EvaluatedCall,
-        input: PipelineData,
-    ) -> Result<PipelineData, LabeledError> {
-        let _ = tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-            .with(tracing_subscriber::EnvFilter::from_default_env())
-            .try_init();
-
-        match input {
-            PipelineData::Value(val, _) => {
-                let val = PipelineData::Value(val, None);
-                tracing::trace!(phase = "return", ?val);
-                Ok(val)
-            }
-            PipelineData::ListStream(stream, _) => {
-                let span = stream.span();
-
-                Ok(PipelineData::ListStream(
-                    ListStream::new(std::iter::empty(), span, engine.signals().clone()),
-                    None,
-                ))
-            }
-            data => Err(LabeledError::new("invalid input").with_label(
-                "Only values can be passed as input",
-                data.span().unwrap_or(Span::unknown()),
-            )),
-        }
     }
 }
