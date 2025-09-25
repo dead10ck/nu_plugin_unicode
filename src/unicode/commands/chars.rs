@@ -27,10 +27,7 @@ impl UnicodeChars {
                 let result = match val {
                     Value::String { val, .. } => val
                         .chars()
-                        .map(|ch| {
-                            let name = ucd::NAMES.get(&ch).copied().into_value(Span::unknown());
-                            Value::record(record!("name" => name), Span::unknown())
-                        })
+                        .map(|ch| ucd::NAMES.get(&ch).cloned().into_value(Span::unknown()))
                         .collect::<Vec<_>>()
                         .into_value(Span::unknown()),
                     val => {
