@@ -1,7 +1,5 @@
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
-use nu_protocol::{
-    IntoValue, LabeledError, ListStream, PipelineData, Signature, Span, Type, Value, record,
-};
+use nu_protocol::{IntoValue, LabeledError, PipelineData, Signature, Span, Type, Value};
 use tracing_subscriber::prelude::*;
 
 use crate::{Unicode, ucd, unicode::constants};
@@ -27,7 +25,12 @@ impl UnicodeChars {
                 let result = match val {
                     Value::String { val, .. } => val
                         .chars()
-                        .map(|ch| ucd::NAMES.get(&ch).cloned().into_value(Span::unknown()))
+                        .map(|ch| {
+                            ucd::names::NAMES
+                                .get(&ch)
+                                .cloned()
+                                .into_value(Span::unknown())
+                        })
                         .collect::<Vec<_>>()
                         .into_value(Span::unknown()),
                     val => {
