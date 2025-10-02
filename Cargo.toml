@@ -30,11 +30,14 @@ codegen-units = 1
 lto = "thin"
 
 [build-dependencies]
+phf = "0.13.1"
+phf_codegen = "0.13.1"
 ucd-parse = "0.1.13"
 
 [dependencies]
 nu-plugin = "0.107.0"
 nu-protocol = "0.107.0"
+phf = "0.13.1"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }

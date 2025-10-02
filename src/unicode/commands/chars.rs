@@ -26,9 +26,10 @@ impl UnicodeChars {
                     Value::String { val, .. } => val
                         .chars()
                         .map(|ch| {
-                            ucd::names::NAMES
-                                .get(&ch)
+                            ucd::UNICODE_DATA
+                                .get(&(ch as u32))
                                 .cloned()
+                                .map(Vec::from)
                                 .into_value(Span::unknown())
                         })
                         .collect::<Vec<_>>()
