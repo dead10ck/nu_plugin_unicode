@@ -1,17 +1,39 @@
-[package]
-name = "nu_plugin_unicode"
+[workspace]
+resolver = "2"
+members = [
+  "crates/*",
+]
+default-members = [
+  "crates/*",
+]
 
+[workspace.package]
 version = "0.1.0-alpha.1"
 edition = "2024"
 
 authors = ["Skyler Hawthorne <skyler@dead10ck.dev>"]
-description = "A utility for working with Unicode text"
 
 repository = "https://github.com/dead10ck/nu_plugin_unicode"
 license = "MPL-2.0"
 readme = "README.md"
 keywords = ["nu", "nushell", "plugin", "unicode"]
 categories = ["command-line-utilities"]
+
+[package]
+name = "nu_plugin_unicode"
+description = "A utility for working with Unicode text"
+
+version.workspace = true
+edition.workspace = true
+
+authors.workspace = true
+
+repository.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
 exclude = [ ".github/" ]
 
 [package.metadata.release]
@@ -29,20 +51,24 @@ bench = false
 codegen-units = 1
 lto = "thin"
 
-[build-dependencies]
-phf = "0.13.1"
-phf_codegen = "0.13.1"
-ucd-parse = "0.1.13"
-
 [dependencies]
-nu-plugin = "0.107.0"
-nu-protocol = "0.107.0"
-phf = "0.13.1"
+nu_plugin_unicode_ucd = { path = "crates/nu_plugin_unicode_ucd" }
 
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
-ucd-parse = "0.1.13"
+nu-plugin = "0.107.0"
+nu-protocol = { workspace = true }
+phf = { workspace = true }
+
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+ucd-parse = { workspace = true }
 
 [dev-dependencies]
 nu-plugin-test-support = "0.107.0"
 # nu-command = "0.107.0"
+
+[workspace.dependencies]
+nu-protocol = "0.107.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
+phf = "0.13.1"
+ucd-parse = "0.1.13"

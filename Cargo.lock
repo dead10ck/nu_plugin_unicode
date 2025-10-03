@@ -1045,10 +1045,20 @@ dependencies = [
  "nu-plugin",
  "nu-plugin-test-support",
  "nu-protocol",
+ "nu_plugin_unicode_ucd",
  "phf",
- "phf_codegen",
  "tracing",
  "tracing-subscriber",
+ "ucd-parse",
+]
+
+[[package]]
+name = "nu_plugin_unicode_ucd"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "nu-protocol",
+ "phf",
+ "phf_codegen",
  "ucd-parse",
 ]
 
