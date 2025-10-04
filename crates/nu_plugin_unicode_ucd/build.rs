@@ -4,7 +4,8 @@ use std::io::{BufWriter, Write};
 use std::path::Path;
 
 use ucd_parse::{
-    UnicodeData, UnicodeDataDecomposition, UnicodeDataDecompositionTag, UnicodeDataNumeric,
+    Codepoint, UnicodeData, UnicodeDataDecomposition, UnicodeDataDecompositionTag,
+    UnicodeDataNumeric,
 };
 
 fn main() {
@@ -12,13 +13,15 @@ fn main() {
     let phf_source_path = Path::new(&env::var("OUT_DIR").unwrap()).join("codegen.rs");
     let mut phf_source_file = BufWriter::new(File::create(&phf_source_path).unwrap());
 
-    let unicode_data = ucd_parse::parse_many_by_codepoint::<_, UnicodeData>(ucd_dir).unwrap();
+    let unicode_data = ucd_parse::parse_by_codepoint::<_, UnicodeData>(ucd_dir).unwrap();
 
     let mut phf_source = phf_codegen::Map::<u32>::new();
 
     for (codepoint, data) in unicode_data.into_iter() {
-        let data = data.into_iter().map(UnicodeDataLiteral).collect::<Vec<_>>();
-        phf_source.entry(codepoint.value(), format!("&{:?}", data));
+        phf_source.entry(
+            codepoint.value(),
+            format!("&{:?}", UnicodeDataLiteral(data)),
+        );
     }
 
     writeln!(
@@ -29,7 +32,7 @@ fn main() {
 
     writeln!(
         &mut phf_source_file,
-        "pub static UNICODE_DATA: phf::Map<u32, &[UnicodeDataStatic]> = {};\n",
+        "pub static UNICODE_DATA: phf::Map<u32, &UnicodeDataStatic> = {};\n",
         phf_source.build()
     )
     .unwrap();
@@ -73,13 +76,16 @@ impl std::fmt::Debug for UnicodeDataDecompositionLiteral<'_> {
             .field("len", &self.0.len)
             .field(
                 "mapping",
-                &self
-                    .0
-                    .mapping
-                    .iter()
-                    .map(|cp| cp.value())
-                    .collect::<Vec<_>>()
-                    .as_slice(),
+                &format_args!(
+                    "&{:?}",
+                    self.0
+                        .mapping
+                        .iter()
+                        .map(|cp| cp.value())
+                        .take_while(|cp| *cp != 0)
+                        .collect::<Vec<_>>()
+                        .as_slice()
+                ),
             )
             .finish()
     }
@@ -89,6 +95,37 @@ struct UnicodeDataLiteral(pub UnicodeData);
 
 impl std::fmt::Debug for UnicodeDataLiteral {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let zero = Codepoint::from_u32(0).unwrap();
+
+        let default_mapping = [
+            self.0.codepoint,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+            zero,
+        ];
+
+        let decomposition = if self.0.decomposition.mapping == default_mapping
+            && self.0.decomposition.tag.is_none()
+        {
+            None
+        } else {
+            Some(UnicodeDataDecompositionLiteral(&self.0.decomposition))
+        };
+
         fmt.debug_struct("UnicodeDataStatic")
             .field("codepoint", &self.0.codepoint.value())
             .field("name", &self.0.name)
@@ -98,10 +135,7 @@ impl std::fmt::Debug for UnicodeDataLiteral {
                 &self.0.canonical_combining_class,
             )
             .field("bidi_class", &self.0.bidi_class)
-            .field(
-                "decomposition",
-                &UnicodeDataDecompositionLiteral(&self.0.decomposition),
-            )
+            .field("decomposition", &decomposition)
             .field("numeric_type_decimal", &self.0.numeric_type_decimal)
             .field("numeric_type_digit", &self.0.numeric_type_digit)
             .field(

@@ -28,8 +28,8 @@ impl UnicodeChars {
                         .map(|ch| {
                             nu_plugin_unicode_ucd::UNICODE_DATA
                                 .get(&(ch as u32))
+                                .copied()
                                 .cloned()
-                                .map(Vec::from)
                                 .into_value(Span::unknown())
                         })
                         .collect::<Vec<_>>()

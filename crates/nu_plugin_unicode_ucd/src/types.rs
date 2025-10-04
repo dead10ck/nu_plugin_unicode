@@ -33,7 +33,7 @@ impl IntoValue for UnicodeDataDecompositionTagStatic {
 
 /// Represents a decomposition mapping of a single row in the
 /// `UnicodeData.txt` file.
-#[derive(Clone, Debug, Default, Eq, PartialEq, IntoValue)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnicodeDataDecompositionStatic {
     /// The formatting tag associated with this mapping, if present.
     pub tag: Option<UnicodeDataDecompositionTagStatic>,
@@ -42,7 +42,18 @@ pub struct UnicodeDataDecompositionStatic {
     /// The codepoints in the mapping. Entries beyond `len` in the mapping
     /// are always U+0000. If no mapping was present, then this always contains
     /// a single codepoint corresponding to this row's character.
-    pub mapping: [u32; 18],
+    pub mapping: &'static [u32],
+}
+
+impl IntoValue for UnicodeDataDecompositionStatic {
+    fn into_value(self, span: Span) -> Value {
+        record!(
+            "tag" => self.tag.into_value(span),
+            // no need to encode length
+            "mapping" => self.mapping.to_vec().into_value(span),
+        )
+        .into_value(span)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,7 +97,7 @@ pub struct UnicodeDataStatic {
     pub bidi_class: &'static str,
     /// The decomposition mapping for this codepoint. This includes its
     /// formatting tag (if present).
-    pub decomposition: UnicodeDataDecompositionStatic,
+    pub decomposition: Option<UnicodeDataDecompositionStatic>,
     /// A decimal numeric representation of this codepoint, if it has the
     /// property `Numeric_Type=Decimal`.
     pub numeric_type_decimal: Option<u8>,
