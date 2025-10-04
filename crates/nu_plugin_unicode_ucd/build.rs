@@ -3,7 +3,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use ucd_parse::{UnicodeData, UnicodeDataDecomposition};
+use ucd_parse::{
+    UnicodeData, UnicodeDataDecomposition, UnicodeDataDecompositionTag, UnicodeDataNumeric,
+};
 
 fn main() {
     let ucd_dir = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("ucd");
@@ -14,10 +16,16 @@ fn main() {
 
     let mut phf_source = phf_codegen::Map::<u32>::new();
 
-    for (codepoint, data) in unicode_data.into_iter().take(10) {
+    for (codepoint, data) in unicode_data.into_iter() {
         let data = data.into_iter().map(UnicodeDataLiteral).collect::<Vec<_>>();
         phf_source.entry(codepoint.value(), format!("&{:?}", data));
     }
+
+    writeln!(
+        &mut phf_source_file,
+        "use ucd_parse::{{UnicodeDataDecompositionTag, UnicodeDataNumeric}};\n",
+    )
+    .unwrap();
 
     writeln!(
         &mut phf_source_file,
@@ -27,12 +35,41 @@ fn main() {
     .unwrap();
 }
 
-struct UnicodeDataDecompositionLiteral<'a>(&'a UnicodeDataDecomposition);
+struct UnicodeDataDecompositionTagLiteral(pub UnicodeDataDecompositionTag);
+
+impl std::fmt::Debug for UnicodeDataDecompositionTagLiteral {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.write_fmt(format_args!(
+            "UnicodeDataDecompositionTagStatic(UnicodeDataDecompositionTag::{:?})",
+            self.0
+        ))
+    }
+}
+
+struct UnicodeDataNumericLiteral(pub UnicodeDataNumeric);
+
+impl std::fmt::Debug for UnicodeDataNumericLiteral {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.write_fmt(format_args!(
+            "UnicodeDataNumericStatic(UnicodeDataNumeric::{:?})",
+            self.0
+        ))
+    }
+}
+
+struct UnicodeDataDecompositionLiteral<'a>(pub &'a UnicodeDataDecomposition);
 
 impl std::fmt::Debug for UnicodeDataDecompositionLiteral<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fmt.debug_struct("UnicodeDataDecompositionStatic")
-            .field("tag", &self.0.tag)
+            .field(
+                "tag",
+                &self
+                    .0
+                    .tag
+                    .as_ref()
+                    .map(|tag| UnicodeDataDecompositionTagLiteral(tag.clone())),
+            )
             .field("len", &self.0.len)
             .field(
                 "mapping",
@@ -48,7 +85,7 @@ impl std::fmt::Debug for UnicodeDataDecompositionLiteral<'_> {
     }
 }
 
-struct UnicodeDataLiteral(UnicodeData);
+struct UnicodeDataLiteral(pub UnicodeData);
 
 impl std::fmt::Debug for UnicodeDataLiteral {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,13 +104,38 @@ impl std::fmt::Debug for UnicodeDataLiteral {
             )
             .field("numeric_type_decimal", &self.0.numeric_type_decimal)
             .field("numeric_type_digit", &self.0.numeric_type_digit)
-            .field("numeric_type_numeric", &self.0.numeric_type_numeric)
+            .field(
+                "numeric_type_numeric",
+                &self
+                    .0
+                    .numeric_type_numeric
+                    .as_ref()
+                    .map(|num| UnicodeDataNumericLiteral(*num)),
+            )
             .field("bidi_mirrored", &self.0.bidi_mirrored)
             .field("unicode1_name", &self.0.unicode1_name)
             .field("iso_comment", &self.0.iso_comment)
-            .field("simple_uppercase_mapping", &self.0.simple_uppercase_mapping)
-            .field("simple_lowercase_mapping", &self.0.simple_lowercase_mapping)
-            .field("simple_titlecase_mapping", &self.0.simple_titlecase_mapping)
+            .field(
+                "simple_uppercase_mapping",
+                &self
+                    .0
+                    .simple_uppercase_mapping
+                    .map(ucd_parse::Codepoint::value),
+            )
+            .field(
+                "simple_lowercase_mapping",
+                &self
+                    .0
+                    .simple_lowercase_mapping
+                    .map(ucd_parse::Codepoint::value),
+            )
+            .field(
+                "simple_titlecase_mapping",
+                &self
+                    .0
+                    .simple_titlecase_mapping
+                    .map(ucd_parse::Codepoint::value),
+            )
             .finish()
     }
 }

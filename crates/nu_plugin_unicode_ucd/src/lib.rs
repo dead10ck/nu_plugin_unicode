@@ -1,4 +1,7 @@
-use crate::types::{UnicodeDataDecompositionStatic, UnicodeDataStatic};
+use crate::types::{
+    UnicodeDataDecompositionStatic, UnicodeDataDecompositionTagStatic, UnicodeDataNumericStatic,
+    UnicodeDataStatic,
+};
 
 mod types;
 

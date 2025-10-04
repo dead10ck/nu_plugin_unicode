@@ -5,7 +5,7 @@ use nu_protocol::{IntoValue, Span, Value, record};
 use ucd_parse::{UnicodeDataDecompositionTag, UnicodeDataNumeric};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UnicodeDataDecompositionTagStatic(ucd_parse::UnicodeDataDecompositionTag);
+pub struct UnicodeDataDecompositionTagStatic(pub ucd_parse::UnicodeDataDecompositionTag);
 
 impl IntoValue for UnicodeDataDecompositionTagStatic {
     fn into_value(self, span: Span) -> Value {
@@ -46,7 +46,7 @@ pub struct UnicodeDataDecompositionStatic {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UnicodeDataNumericStatic(ucd_parse::UnicodeDataNumeric);
+pub struct UnicodeDataNumericStatic(pub ucd_parse::UnicodeDataNumeric);
 
 impl IntoValue for UnicodeDataNumericStatic {
     fn into_value(self, span: Span) -> Value {

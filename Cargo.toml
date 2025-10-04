@@ -4,6 +4,7 @@ members = [
   "crates/*",
 ]
 default-members = [
+  ".",
   "crates/*",
 ]
 

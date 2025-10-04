@@ -2,7 +2,7 @@ use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
 use nu_protocol::{IntoValue, LabeledError, PipelineData, Signature, Span, Type, Value};
 use tracing_subscriber::prelude::*;
 
-use crate::{Unicode, ucd, unicode::constants};
+use crate::{Unicode, unicode::constants};
 
 #[derive(Debug)]
 pub struct UnicodeChars;
@@ -26,7 +26,7 @@ impl UnicodeChars {
                     Value::String { val, .. } => val
                         .chars()
                         .map(|ch| {
-                            ucd::UNICODE_DATA
+                            nu_plugin_unicode_ucd::UNICODE_DATA
                                 .get(&(ch as u32))
                                 .cloned()
                                 .map(Vec::from)
