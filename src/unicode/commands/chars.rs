@@ -1,5 +1,7 @@
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
-use nu_protocol::{IntoValue, LabeledError, PipelineData, Signature, Span, Type, Value};
+use nu_protocol::{
+    IntoValue, LabeledError, PipelineData, ShellError, Signature, Span, Type, Value,
+};
 use tracing_subscriber::prelude::*;
 
 use crate::{Unicode, unicode::constants};
@@ -21,42 +23,49 @@ impl UnicodeChars {
             .try_init();
 
         match input {
-            PipelineData::Value(val, _) => {
-                let result = match val {
-                    Value::String { val, .. } => val
-                        .chars()
-                        .map(|ch| {
-                            nu_plugin_unicode_ucd::UNICODE_DATA
-                                .get(&(ch as u32))
-                                .copied()
-                                .cloned()
-                                .into_value(Span::unknown())
-                        })
-                        .collect::<Vec<_>>()
-                        .into_value(Span::unknown()),
-                    val => {
-                        return Err(LabeledError::new("Invalid input")
-                            .with_label("Should be string or utf-8 bytes", val.span()));
-                    }
-                };
-                let result = PipelineData::Value(result, None);
-                tracing::trace!(phase = "return", ?result);
-                Ok(result)
-            }
-            PipelineData::ListStream(_stream, _) => {
-                todo!();
-                // let span = stream.span();
+            PipelineData::Value(val, _) => Ok(PipelineData::Value(Self::chars(val)?, None)),
+            PipelineData::ListStream(stream, _) => {
+                let span = stream.span();
 
-                // Ok(PipelineData::ListStream(
-                //     ListStream::new(std::iter::empty(), span, engine.signals().clone()),
-                //     None,
-                // ))
+                Ok(PipelineData::ListStream(
+                    stream.map(move |val| {
+                        Self::chars(val)
+                            .unwrap_or_else(|err| Value::error(ShellError::from(err), span))
+                    }),
+                    None,
+                ))
             }
             data => Err(LabeledError::new("invalid input").with_label(
                 "Only values can be passed as input",
                 data.span().unwrap_or(Span::unknown()),
             )),
         }
+    }
+    pub(crate) fn chars(val: Value) -> Result<Value, LabeledError> {
+        let result = match val {
+            Value::String { val, .. } => val
+                .chars()
+                .map(|ch| {
+                    nu_plugin_unicode_ucd::UNICODE_DATA
+                        .get(&(ch as u32))
+                        .copied()
+                        .cloned()
+                        .into_value(Span::unknown())
+                })
+                .collect::<Vec<_>>()
+                .into_value(Span::unknown()),
+            Value::List { vals, .. } => vals
+                .into_iter()
+                .map(Self::chars)
+                .collect::<Result<Vec<Value>, _>>()?
+                .into_value(Span::unknown()),
+            val => {
+                return Err(LabeledError::new("Invalid input")
+                    .with_label("Should be string or utf-8 bytes", val.span()));
+            }
+        };
+        tracing::trace!(phase = "return", ?result);
+        Ok(result)
     }
 }
 
@@ -82,8 +91,10 @@ impl PluginCommand for UnicodeChars {
     }
 
     fn signature(&self) -> nu_protocol::Signature {
-        Signature::build(self.name())
-            .input_output_types(vec![(Type::String, Type::Table([].into()))])
+        Signature::build(self.name()).input_output_types(vec![
+            (Type::String, Type::Table([].into())),
+            (Type::List(Box::new(Type::Any)), Type::Table([].into())),
+        ])
     }
 
     fn examples(&self) -> Vec<nu_protocol::Example<'static>> {
