@@ -46,6 +46,7 @@ impl UnicodeChars {
             )),
         }
     }
+
     pub(crate) fn chars(val: Value, signals: &Signals) -> Result<Value, LabeledError> {
         let result = match val {
             Value::String { val, .. } => val
@@ -94,6 +95,14 @@ impl UnicodeChars {
                     }
                 }
             }
+            binary_val @ Value::Binary { .. } => {
+                let span = binary_val.span();
+                let val = binary_val.as_binary().unwrap();
+                let str = String::from_utf8(val.into()).map_err(|err| {
+                    LabeledError::new("non-utf-8 bytes").with_label(err.to_string(), span)
+                })?;
+                Self::chars(str.into_value(span), signals)?
+            }
             val => {
                 return Err(LabeledError::new("Invalid input").with_label(
                     "Input could not be converted to a Unicode codepoint",
@@ -130,6 +139,8 @@ impl PluginCommand for UnicodeChars {
     fn signature(&self) -> nu_protocol::Signature {
         Signature::build(self.name()).input_output_types(vec![
             (Type::String, Type::Table([].into())),
+            (Type::Binary, Type::Table([].into())),
+            (Type::Int, Type::Table([].into())),
             (Type::Range, Type::Table([].into())),
             (Type::List(Box::new(Type::Any)), Type::Table([].into())),
         ])
