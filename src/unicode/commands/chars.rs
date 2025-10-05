@@ -1,4 +1,5 @@
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
+use nu_plugin_unicode_ucd::UNICODE_DATA;
 use nu_protocol::{
     IntoValue, LabeledError, PipelineData, ShellError, Signature, Span, Type, Value,
 };
@@ -46,7 +47,7 @@ impl UnicodeChars {
             Value::String { val, .. } => val
                 .chars()
                 .map(|ch| {
-                    nu_plugin_unicode_ucd::UNICODE_DATA
+                    UNICODE_DATA
                         .get(&(ch as u32))
                         .copied()
                         .cloned()
@@ -59,6 +60,18 @@ impl UnicodeChars {
                 .map(Self::chars)
                 .collect::<Result<Vec<Value>, _>>()?
                 .into_value(Span::unknown()),
+            int_val @ Value::Int { val, .. } => {
+                let span = int_val.span();
+
+                UNICODE_DATA
+                    .get(&u32::try_from(val).map_err(|err| {
+                        LabeledError::new("invalid char").with_label(err.to_string(), span)
+                    })?)
+                    .copied()
+                    .cloned()
+                    .map(|data| data.into_value(Span::unknown()))
+                    .unwrap_or(Value::nothing(Span::unknown()))
+            }
             val => {
                 return Err(LabeledError::new("Invalid input")
                     .with_label("Should be string or utf-8 bytes", val.span()));
