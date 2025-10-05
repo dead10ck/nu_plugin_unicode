@@ -1,7 +1,7 @@
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
 use nu_plugin_unicode_ucd::UNICODE_DATA;
 use nu_protocol::{
-    IntoValue, LabeledError, PipelineData, ShellError, Signature, Span, Type, Value,
+    IntoValue, LabeledError, PipelineData, Range, ShellError, Signals, Signature, Span, Type, Value,
 };
 use tracing_subscriber::prelude::*;
 
@@ -14,7 +14,7 @@ impl UnicodeChars {
     pub(crate) fn run_impl(
         &self,
         _plugin: &Unicode,
-        _engine: &EngineInterface,
+        engine: &EngineInterface,
         _call: &EvaluatedCall,
         input: PipelineData,
     ) -> Result<PipelineData, LabeledError> {
@@ -24,16 +24,20 @@ impl UnicodeChars {
             .try_init();
 
         match input {
-            PipelineData::Value(val, _) => Ok(PipelineData::Value(Self::chars(val)?, None)),
-            PipelineData::ListStream(stream, _) => {
+            PipelineData::Value(val, meta) => Ok(PipelineData::Value(
+                Self::chars(val, engine.signals())?,
+                meta,
+            )),
+            PipelineData::ListStream(stream, meta) => {
                 let span = stream.span();
+                let signals = engine.signals().clone();
 
                 Ok(PipelineData::ListStream(
                     stream.map(move |val| {
-                        Self::chars(val)
+                        Self::chars(val, &signals)
                             .unwrap_or_else(|err| Value::error(ShellError::from(err), span))
                     }),
-                    None,
+                    meta,
                 ))
             }
             data => Err(LabeledError::new("invalid input").with_label(
@@ -42,7 +46,7 @@ impl UnicodeChars {
             )),
         }
     }
-    pub(crate) fn chars(val: Value) -> Result<Value, LabeledError> {
+    pub(crate) fn chars(val: Value, signals: &Signals) -> Result<Value, LabeledError> {
         let result = match val {
             Value::String { val, .. } => val
                 .chars()
@@ -57,7 +61,7 @@ impl UnicodeChars {
                 .into_value(Span::unknown()),
             Value::List { vals, .. } => vals
                 .into_iter()
-                .map(Self::chars)
+                .map(|val| Self::chars(val, signals))
                 .collect::<Result<Vec<Value>, _>>()?
                 .into_value(Span::unknown()),
             int_val @ Value::Int { val, .. } => {
@@ -72,9 +76,29 @@ impl UnicodeChars {
                     .map(|data| data.into_value(Span::unknown()))
                     .unwrap_or(Value::nothing(Span::unknown()))
             }
+            ref range_val @ Value::Range { .. } => {
+                let span = range_val.span();
+                let val = range_val.as_range().unwrap();
+
+                match val {
+                    Range::IntRange(range) => range
+                        .into_range_iter(signals.clone())
+                        .map(|i| Self::chars(i.into_value(span), signals))
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_value(span),
+                    Range::FloatRange(_) => {
+                        return Err(LabeledError::new("Invalid input").with_label(
+                            "Input could not be converted to a Unicode codepoint",
+                            span,
+                        ));
+                    }
+                }
+            }
             val => {
-                return Err(LabeledError::new("Invalid input")
-                    .with_label("Should be string or utf-8 bytes", val.span()));
+                return Err(LabeledError::new("Invalid input").with_label(
+                    "Input could not be converted to a Unicode codepoint",
+                    val.span(),
+                ));
             }
         };
         tracing::trace!(phase = "return", ?result);
@@ -106,6 +130,7 @@ impl PluginCommand for UnicodeChars {
     fn signature(&self) -> nu_protocol::Signature {
         Signature::build(self.name()).input_output_types(vec![
             (Type::String, Type::Table([].into())),
+            (Type::Range, Type::Table([].into())),
             (Type::List(Box::new(Type::Any)), Type::Table([].into())),
         ])
     }
