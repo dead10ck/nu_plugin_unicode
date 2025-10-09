@@ -63,6 +63,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ucd-parse = { workspace = true }
 encoding_rs_io = "0.1.7"
+encoding_rs = "0.8.35"
 
 [dev-dependencies]
 nu-plugin-test-support = "0.107.0"

@@ -1,16 +1,20 @@
 use std::io::{BufRead, BufReader};
 
-use encoding_rs_io::DecodeReaderBytes;
+use encoding_rs::Encoding;
+use encoding_rs_io::DecodeReaderBytesBuilder;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
 use nu_plugin_unicode_ucd::UNICODE_DATA;
 use nu_protocol::{
     IntoValue, LabeledError, ListStream, PipelineData, Range, ShellError, Signals, Signature, Span,
-    Type, Value,
+    SyntaxShape, Type, Value,
     shell_error::io::{self, IoError},
 };
 use tracing_subscriber::prelude::*;
 
-use crate::{Unicode, unicode::constants};
+use crate::{
+    Unicode,
+    unicode::constants::{self, commands::chars::flags},
+};
 
 #[derive(Debug)]
 pub struct UnicodeChars;
@@ -20,7 +24,7 @@ impl UnicodeChars {
         &self,
         _plugin: &Unicode,
         engine: &EngineInterface,
-        _call: &EvaluatedCall,
+        call: &EvaluatedCall,
         input: PipelineData,
     ) -> Result<PipelineData, LabeledError> {
         let _ = tracing_subscriber::registry()
@@ -48,10 +52,23 @@ impl UnicodeChars {
             PipelineData::ByteStream(stream, meta) => {
                 let span = stream.span();
                 let stream_signals = signals.clone();
+                let encoding = call
+                    .get_flag_value(constants::commands::chars::flags::ENCODING)
+                    .map(|val| val.into_string().unwrap())
+                    .unwrap_or(constants::commands::chars::defaults::ENCODING.into());
+
+                let ignore_bom = call.has_flag(constants::commands::chars::flags::IGNORE_BOM)?;
 
                 let mut reader = match stream.reader() {
                     None => return Ok(PipelineData::empty()),
-                    Some(r) => BufReader::new(DecodeReaderBytes::new(r)),
+                    Some(r) => {
+                        let decoder = DecodeReaderBytesBuilder::new()
+                            .encoding(Encoding::for_label_no_replacement(encoding.as_bytes()))
+                            .bom_override(!ignore_bom)
+                            .build(r);
+
+                        BufReader::new(decoder)
+                    }
                 };
 
                 let out_stream = std::iter::from_fn(move || {
@@ -186,7 +203,7 @@ impl PluginCommand for UnicodeChars {
     }
 
     fn name(&self) -> &str {
-        constants::commands::CHARS
+        constants::commands::chars::NAME
     }
 
     fn description(&self) -> &str {
@@ -198,9 +215,10 @@ impl PluginCommand for UnicodeChars {
             (Type::String, Type::Table([].into())),
             (Type::Binary, Type::Table([].into())),
             (Type::Int, Type::Table([].into())),
-            (Type::Range, Type::Table([].into())),
-            (Type::List(Box::new(Type::Any)), Type::Table([].into())),
+            (Type::Range, Type::Table([].into())), (Type::List(Box::new(Type::Any)), Type::Table([].into())),
         ])
+        .named(flags::ENCODING, SyntaxShape::String, "Encoding of the input bytes. By default, BOM sniffing occurs to detect the encoding; failing that, UTF-8 is assumed.", Some('e'))
+        .switch(flags::IGNORE_BOM, "Ignore the BOM, if present. By default, even if an encoding is specified, if a BOM is present, the encoding from the command line is ignored.", Some('b'))
     }
 
     fn examples(&self) -> Vec<nu_protocol::Example<'static>> {

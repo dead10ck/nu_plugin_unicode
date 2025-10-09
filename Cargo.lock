@@ -1060,6 +1060,7 @@ dependencies = [
 name = "nu_plugin_unicode"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "encoding_rs",
  "encoding_rs_io",
  "nu-plugin",
  "nu-plugin-test-support",
