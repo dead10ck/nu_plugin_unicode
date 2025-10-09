@@ -1,7 +1,12 @@
+use std::io::{BufRead, BufReader};
+
+use encoding_rs_io::DecodeReaderBytes;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
 use nu_plugin_unicode_ucd::UNICODE_DATA;
 use nu_protocol::{
-    IntoValue, LabeledError, PipelineData, Range, ShellError, Signals, Signature, Span, Type, Value,
+    IntoValue, LabeledError, ListStream, PipelineData, Range, ShellError, Signals, Signature, Span,
+    Type, Value,
+    shell_error::io::{self, IoError},
 };
 use tracing_subscriber::prelude::*;
 
@@ -22,6 +27,7 @@ impl UnicodeChars {
             .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .try_init();
+        let signals = engine.signals().clone();
 
         match input {
             PipelineData::Value(val, meta) => Ok(PipelineData::Value(
@@ -30,13 +36,64 @@ impl UnicodeChars {
             )),
             PipelineData::ListStream(stream, meta) => {
                 let span = stream.span();
-                let signals = engine.signals().clone();
 
                 Ok(PipelineData::ListStream(
                     stream.map(move |val| {
                         Self::chars(val, &signals)
                             .unwrap_or_else(|err| Value::error(ShellError::from(err), span))
                     }),
+                    meta,
+                ))
+            }
+            PipelineData::ByteStream(stream, meta) => {
+                let span = stream.span();
+                let stream_signals = signals.clone();
+
+                let mut reader = match stream.reader() {
+                    None => return Ok(PipelineData::empty()),
+                    Some(r) => BufReader::new(DecodeReaderBytes::new(r)),
+                };
+
+                let out_stream = std::iter::from_fn(move || {
+                    let buf = match reader.fill_buf() {
+                        Ok(bytes) => bytes,
+                        Err(err) => {
+                            return Some(Value::error(
+                                ShellError::from(IoError::new(
+                                    io::ErrorKind::from(err),
+                                    span,
+                                    None,
+                                )),
+                                span,
+                            ));
+                        }
+                    };
+
+                    tracing::debug!(phase = "read", input = buf);
+
+                    let read_bytes = buf.len();
+
+                    if read_bytes == 0 {
+                        return None;
+                    }
+
+                    let val = Self::chars(
+                        Value::string(unsafe { String::from_utf8_unchecked(buf.to_vec()) }, span),
+                        &stream_signals,
+                    )
+                    .unwrap_or_else(|err| Value::error(ShellError::from(err), span));
+
+                    reader.consume(read_bytes);
+
+                    Some(val)
+                })
+                .flat_map(|val| match val {
+                    Value::List { vals, .. } => vals,
+                    _ => vec![val],
+                });
+
+                Ok(PipelineData::ListStream(
+                    ListStream::new(out_stream, span, signals),
                     meta,
                 ))
             }
