@@ -1,6 +1,5 @@
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor, Read};
 
-use encoding_rs::Encoding;
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
 use nu_plugin_unicode_ucd::UNICODE_DATA;
@@ -13,8 +12,13 @@ use tracing_subscriber::prelude::*;
 
 use crate::{
     Unicode,
-    unicode::constants::{self, commands::chars::flags},
+    unicode::{
+        commands::chars::config::Config,
+        constants::{self, commands::chars::flags},
+    },
 };
+
+pub mod config;
 
 #[derive(Debug)]
 pub struct UnicodeChars;
@@ -32,19 +36,23 @@ impl UnicodeChars {
             .with(tracing_subscriber::EnvFilter::from_default_env())
             .try_init();
         let signals = engine.signals().clone();
+        let config = Config::try_from(call)?;
 
         match input {
             PipelineData::Value(val, meta) => Ok(PipelineData::Value(
-                Self::chars(val, engine.signals())?,
+                Self::chars(val, &config, engine.signals())?,
                 meta,
             )),
             PipelineData::ListStream(stream, meta) => {
                 let span = stream.span();
+                let stream_signals = signals.clone();
 
                 Ok(PipelineData::ListStream(
-                    stream.map(move |val| {
-                        Self::chars(val, &signals)
-                            .unwrap_or_else(|err| Value::error(ShellError::from(err), span))
+                    stream.map({
+                        move |val| {
+                            Self::chars(val, &config, &stream_signals)
+                                .unwrap_or_else(|err| Value::error(ShellError::from(err), span))
+                        }
                     }),
                     meta,
                 ))
@@ -52,62 +60,12 @@ impl UnicodeChars {
             PipelineData::ByteStream(stream, meta) => {
                 let span = stream.span();
                 let stream_signals = signals.clone();
-                let encoding = call
-                    .get_flag_value(constants::commands::chars::flags::ENCODING)
-                    .map(|val| val.into_string().unwrap())
-                    .unwrap_or(constants::commands::chars::defaults::ENCODING.into());
-
-                let ignore_bom = call.has_flag(constants::commands::chars::flags::IGNORE_BOM)?;
-
-                let mut reader = match stream.reader() {
+                let reader = match stream.reader() {
                     None => return Ok(PipelineData::empty()),
-                    Some(r) => {
-                        let decoder = DecodeReaderBytesBuilder::new()
-                            .encoding(Encoding::for_label_no_replacement(encoding.as_bytes()))
-                            .bom_override(!ignore_bom)
-                            .build(r);
-
-                        BufReader::new(decoder)
-                    }
+                    Some(r) => r,
                 };
 
-                let out_stream = std::iter::from_fn(move || {
-                    let buf = match reader.fill_buf() {
-                        Ok(bytes) => bytes,
-                        Err(err) => {
-                            return Some(Value::error(
-                                ShellError::from(IoError::new(
-                                    io::ErrorKind::from(err),
-                                    span,
-                                    None,
-                                )),
-                                span,
-                            ));
-                        }
-                    };
-
-                    tracing::debug!(phase = "read", input = buf);
-
-                    let read_bytes = buf.len();
-
-                    if read_bytes == 0 {
-                        return None;
-                    }
-
-                    let val = Self::chars(
-                        Value::string(unsafe { String::from_utf8_unchecked(buf.to_vec()) }, span),
-                        &stream_signals,
-                    )
-                    .unwrap_or_else(|err| Value::error(ShellError::from(err), span));
-
-                    reader.consume(read_bytes);
-
-                    Some(val)
-                })
-                .flat_map(|val| match val {
-                    Value::List { vals, .. } => vals,
-                    _ => vec![val],
-                });
+                let out_stream = decode_bytes(reader, &config, span, stream_signals)?;
 
                 Ok(PipelineData::ListStream(
                     ListStream::new(out_stream, span, signals),
@@ -121,7 +79,11 @@ impl UnicodeChars {
         }
     }
 
-    pub(crate) fn chars(val: Value, signals: &Signals) -> Result<Value, LabeledError> {
+    pub(crate) fn chars(
+        val: Value,
+        config: &Config,
+        signals: &Signals,
+    ) -> Result<Value, LabeledError> {
         let result = match val {
             Value::String { val, .. } => val
                 .chars()
@@ -136,7 +98,7 @@ impl UnicodeChars {
                 .into_value(Span::unknown()),
             Value::List { vals, .. } => vals
                 .into_iter()
-                .map(|val| Self::chars(val, signals))
+                .map(|val| Self::chars(val, config, signals))
                 .collect::<Result<Vec<Value>, _>>()?
                 .into_value(Span::unknown()),
             int_val @ Value::Int { val, .. } => {
@@ -158,7 +120,7 @@ impl UnicodeChars {
                 match val {
                     Range::IntRange(range) => range
                         .into_range_iter(signals.clone())
-                        .map(|i| Self::chars(i.into_value(span), signals))
+                        .map(|i| Self::chars(i.into_value(span), config, signals))
                         .collect::<Result<Vec<_>, _>>()?
                         .into_value(span),
                     Range::FloatRange(_) => {
@@ -171,11 +133,12 @@ impl UnicodeChars {
             }
             binary_val @ Value::Binary { .. } => {
                 let span = binary_val.span();
-                let val = binary_val.as_binary().unwrap();
-                let str = String::from_utf8(val.into()).map_err(|err| {
-                    LabeledError::new("non-utf-8 bytes").with_label(err.to_string(), span)
-                })?;
-                Self::chars(str.into_value(span), signals)?
+                let bytes = binary_val.as_binary().unwrap();
+                let cursor = Cursor::new(bytes);
+                Value::list(
+                    decode_bytes(cursor, config, span, signals.clone())?.collect(),
+                    Span::unknown(),
+                )
             }
             val => {
                 return Err(LabeledError::new("Invalid input").with_label(
@@ -187,6 +150,61 @@ impl UnicodeChars {
         tracing::trace!(phase = "return", ?result);
         Ok(result)
     }
+}
+
+fn decode_bytes<'reader, 'cfg, R: Read + 'reader>(
+    reader: R,
+    config: &'cfg Config,
+    span: Span,
+    stream_signals: Signals,
+) -> Result<impl Iterator<Item = Value> + use<R>, LabeledError> {
+    let mut decoder = BufReader::new(
+        DecodeReaderBytesBuilder::new()
+            .encoding(Some(config.encoding))
+            .bom_override(!config.ignore_bom)
+            .build(reader),
+    );
+
+    let vals = std::iter::from_fn({
+        let config = config.clone();
+
+        move || {
+            let buf = match decoder.fill_buf() {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    return Some(Value::error(
+                        ShellError::from(IoError::new(io::ErrorKind::from(err), span, None)),
+                        span,
+                    ));
+                }
+            };
+
+            tracing::debug!(phase = "read", input = buf);
+
+            let read_bytes = buf.len();
+
+            if read_bytes == 0 {
+                return None;
+            }
+
+            let val = UnicodeChars::chars(
+                Value::string(unsafe { String::from_utf8_unchecked(buf.to_vec()) }, span),
+                &config,
+                &stream_signals,
+            )
+            .unwrap_or_else(|err| Value::error(ShellError::from(err), span));
+
+            decoder.consume(read_bytes);
+
+            Some(val)
+        }
+    })
+    .flat_map(|val| match val {
+        Value::List { vals, .. } => vals,
+        _ => vec![val],
+    });
+
+    Ok(vals)
 }
 
 impl PluginCommand for UnicodeChars {
