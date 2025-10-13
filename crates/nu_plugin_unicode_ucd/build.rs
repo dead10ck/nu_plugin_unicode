@@ -10,7 +10,7 @@ use ucd_parse::{
 
 fn main() {
     let ucd_dir = Path::new(&env::var("CARGO_MANIFEST_DIR").unwrap()).join("ucd");
-    let phf_source_path = Path::new(&env::var("OUT_DIR").unwrap()).join("codegen.rs");
+    let phf_source_path = Path::new(&env::var("OUT_DIR").unwrap()).join("unicode_data.rs");
     let mut phf_source_file = BufWriter::new(File::create(&phf_source_path).unwrap());
 
     let unicode_data = ucd_parse::parse_by_codepoint::<_, UnicodeData>(ucd_dir).unwrap();

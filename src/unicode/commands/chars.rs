@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader, Cursor, Read};
 
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
-use nu_plugin_unicode_ucd::UNICODE_DATA;
+use nu_plugin_unicode_ucd::codegen::unicode_data::UNICODE_DATA;
 use nu_protocol::{
     IntoValue, LabeledError, ListStream, PipelineData, Range, ShellError, Signals, Signature, Span,
     SyntaxShape, Type, Value,
