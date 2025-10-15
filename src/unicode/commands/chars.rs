@@ -1,11 +1,16 @@
-use std::io::{BufRead, BufReader, Cursor, Read};
+use std::{
+    fmt::Display,
+    io::{BufRead, BufReader, Cursor, Read},
+};
 
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
-use nu_plugin_unicode_ucd::codegen::unicode_data::UNICODE_DATA;
+use nu_plugin_unicode_ucd::codegen::{name_aliases::NAME_ALIASES, unicode_data::UNICODE_DATA};
 use nu_protocol::{
     IntoValue, LabeledError, ListStream, PipelineData, Range, ShellError, Signals, Signature, Span,
     SyntaxShape, Type, Value,
+    ast::PathMember,
+    casing::Casing,
     shell_error::io::{self, IoError},
 };
 use tracing_subscriber::prelude::*;
@@ -85,17 +90,15 @@ impl UnicodeChars {
         signals: &Signals,
     ) -> Result<Value, LabeledError> {
         let result = match val {
-            Value::String { val, .. } => val
-                .chars()
-                .map(|ch| {
-                    UNICODE_DATA
-                        .get(&(ch as u32))
-                        .copied()
-                        .cloned()
-                        .into_value(Span::unknown())
-                })
-                .collect::<Vec<_>>()
-                .into_value(Span::unknown()),
+            str_val @ Value::String { .. } => {
+                let span = str_val.span();
+                let val = str_val.into_string().unwrap();
+
+                val.chars()
+                    .map(|ch| get_unicode_values(ch, span))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .into_value(Span::unknown())
+            }
             Value::List { vals, .. } => vals
                 .into_iter()
                 .map(|val| Self::chars(val, config, signals))
@@ -103,15 +106,7 @@ impl UnicodeChars {
                 .into_value(Span::unknown()),
             int_val @ Value::Int { val, .. } => {
                 let span = int_val.span();
-
-                UNICODE_DATA
-                    .get(&u32::try_from(val).map_err(|err| {
-                        LabeledError::new("invalid char").with_label(err.to_string(), span)
-                    })?)
-                    .copied()
-                    .cloned()
-                    .map(|data| data.into_value(Span::unknown()))
-                    .unwrap_or(Value::nothing(Span::unknown()))
+                get_unicode_values(val, span)?
             }
             ref range_val @ Value::Range { .. } => {
                 let span = range_val.span();
@@ -150,6 +145,64 @@ impl UnicodeChars {
         tracing::trace!(phase = "return", ?result);
         Ok(result)
     }
+}
+
+fn get_unicode_values(
+    ch: impl TryInto<u32, Error = impl Display>,
+    span: Span,
+) -> Result<Value, LabeledError> {
+    let ch = ch
+        .try_into()
+        .map_err(|err| LabeledError::new("invalid char").with_label(err.to_string(), span))?;
+
+    let mut data = UNICODE_DATA
+        .get(&ch)
+        .copied()
+        .cloned()
+        .map(|data| data.into_value(Span::unknown()))
+        .unwrap_or(Value::nothing(Span::unknown()));
+
+    if data.is_nothing() {
+        return Ok(data);
+    }
+
+    let aliases = NAME_ALIASES.get(&ch).copied().map_or_else(
+        || Result::<_, LabeledError>::Ok(Value::nothing(Span::unknown())),
+        |aliases| {
+            let mut val = aliases.to_vec().into_value(Span::unknown());
+
+            val.remove_data_at_cell_path(&[PathMember::string(
+                "codepoint".into(),
+                false,
+                Casing::Sensitive,
+                Span::unknown(),
+            )])?;
+
+            Ok(val)
+        },
+    )?;
+
+    if let Type::Record(_) = data.get_type() {
+        data.insert_data_at_cell_path(
+            &[PathMember::string(
+                "aliases".into(),
+                false,
+                Casing::Sensitive,
+                Span::unknown(),
+            )],
+            aliases,
+            Span::unknown(),
+        )?;
+    } else {
+        return Err(LabeledError::new("unexpected data")
+            .with_label(
+                "Unicode data returned unexpected result. This is an internal error.",
+                data.span(),
+            )
+            .with_help(format!("{:?}", data)));
+    }
+
+    Ok(data)
 }
 
 fn decode_bytes<'reader, 'cfg, R: Read + 'reader>(

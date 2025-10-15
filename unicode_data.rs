@@ -1,17 +1,12 @@
-use std::{
-    collections::BTreeMap,
-    env,
-    fs::{self, File},
-    io::{self, BufWriter, Write},
-    path::{Path, PathBuf},
-    time::SystemTime,
+use std::collections::BTreeMap;
+use std::env;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::{Path, PathBuf};
+
+use ucd_parse::{
+    Codepoint, UcdFile, UcdFileByCodepoint, 
 };
-
-use ucd_parse::{Codepoint, UcdFile, UcdFileByCodepoint};
-
-use crate::build_types::name_aliases::NameAliasLiteral;
-
-pub mod build_types;
 
 fn main() {
     let ucd_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("ucd");
@@ -20,49 +15,12 @@ fn main() {
     generate_name_aliases(&ucd_dir, &out_dir);
 }
 
-fn get_codegen_file_time() -> io::Result<SystemTime> {
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let build_rs_path = manifest_dir.join("build.rs");
-
-    let build_script_time = std::fs::metadata(build_rs_path)
-        .unwrap()
-        .modified()
-        .unwrap();
-
-    let mut max = build_script_time;
-    let mut dirs = vec![manifest_dir.join("build_types")];
-
-    while let Some(dir) = dirs.pop() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let mtime = entry.metadata()?.modified()?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                dirs.push(path);
-                continue;
-            }
-
-            if mtime > max {
-                max = mtime;
-            }
-        }
-    }
-
-    Ok(max)
-}
-
-fn generate_ucd_source<U, F>(
-    ucd_dir: &Path,
-    out_path: &Path,
-    out_mtime: SystemTime,
-    generate_entries: F,
-) where
+fn generate_ucd_source<U, F>(ucd_dir: &Path, out_path: &Path, generate_entries: F)
+where
     U: UcdFile + UcdFileByCodepoint,
-    F: Fn(BufWriter<&mut File>, BTreeMap<Codepoint, Vec<U>>, phf_codegen::Map<u32>),
+    F: Fn(BufWriter<File>, BTreeMap<Codepoint, Vec<U>>, phf_codegen::Map<u32>),
 {
-    let mut phf_source_file = File::create(out_path).unwrap();
-    let phf_writer = BufWriter::new(&mut phf_source_file);
+    let phf_source_file = BufWriter::new(File::create(out_path).unwrap());
     let parsed = ucd_parse::parse_many_by_codepoint::<_, U>(ucd_dir).unwrap();
 
     println!(
@@ -73,17 +31,13 @@ fn generate_ucd_source<U, F>(
 
     let phf_source = phf_codegen::Map::<u32>::new();
 
-    generate_entries(phf_writer, parsed, phf_source);
-    phf_source_file.set_modified(out_mtime).unwrap();
+    generate_entries(phf_source_file, parsed, phf_source);
 }
 
 fn generate_unicode_data(ucd_dir: &Path, out_dir: &Path) {
-    let codegen_file_time = get_codegen_file_time().unwrap();
-
     generate_ucd_source(
         ucd_dir,
         &out_dir.join("unicode_data.rs"),
-        codegen_file_time,
         |mut writer, parsed, mut phf_source| {
             for (codepoint, mut data) in parsed.into_iter() {
                 assert_eq!(1, data.len());
@@ -91,7 +45,7 @@ fn generate_unicode_data(ucd_dir: &Path, out_dir: &Path) {
 
                 phf_source.entry(
                     codepoint.value(),
-                    format!("&{:?}", build_types::UnicodeDataLiteral(data)),
+                    format!("&{:?}", UnicodeDataLiteral(data)),
                 );
             }
 
@@ -112,15 +66,11 @@ fn generate_unicode_data(ucd_dir: &Path, out_dir: &Path) {
 }
 
 fn generate_name_aliases(ucd_dir: &Path, out_dir: &Path) {
-    let codegen_file_time = get_codegen_file_time().unwrap();
-
     generate_ucd_source(
         ucd_dir,
         &out_dir.join("name_aliases.rs"),
-        codegen_file_time,
         |mut writer, parsed: BTreeMap<Codepoint, Vec<ucd_parse::NameAlias>>, mut phf_source| {
             for (codepoint, aliases) in parsed.into_iter() {
-                let aliases: Vec<_> = aliases.into_iter().map(NameAliasLiteral).collect();
                 phf_source.entry(codepoint.value(), format!("&{:?}", aliases.as_slice()));
             }
 
@@ -128,10 +78,12 @@ fn generate_name_aliases(ucd_dir: &Path, out_dir: &Path) {
 
             writeln!(
                 &mut writer,
-                "pub static NAME_ALIASES: phf::Map<u32, &[NameAliasStatic]> = {};\n",
+                "pub static NAME_ALIASES: phf::Map<u32, &[ucd_parse::NameAlias]> = {};\n",
                 phf_source.build()
             )
             .unwrap();
         },
     )
 }
+
+mod build_types;
