@@ -55,7 +55,7 @@ lto = "thin"
 [dependencies]
 nu_plugin_unicode_ucd = { path = "crates/nu_plugin_unicode_ucd" }
 
-nu-plugin = "0.107.0"
+nu-plugin = "0.108.0"
 nu-protocol = { workspace = true }
 phf = { workspace = true }
 
@@ -66,11 +66,11 @@ encoding_rs_io = "0.1.7"
 encoding_rs = "0.8.35"
 
 [dev-dependencies]
-nu-plugin-test-support = "0.107.0"
+nu-plugin-test-support = "0.108.0"
 # nu-command = "0.107.0"
 
 [workspace.dependencies]
-nu-protocol = "0.107.0"
+nu-protocol = "0.108.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [ "env-filter" ] }
 phf = "0.13.1"
