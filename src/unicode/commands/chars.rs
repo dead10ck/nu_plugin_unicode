@@ -7,8 +7,8 @@ use encoding_rs_io::DecodeReaderBytesBuilder;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
 use nu_plugin_unicode_ucd::codegen::{name_aliases::NAME_ALIASES, unicode_data::UNICODE_DATA};
 use nu_protocol::{
-    IntoValue, LabeledError, ListStream, PipelineData, Range, ShellError, Signals, Signature, Span,
-    SyntaxShape, Type, Value,
+    IntoValue, LabeledError, ListStream, PipelineData, Range, Record, ShellError, Signals,
+    Signature, Span, SyntaxShape, Type, Value,
     ast::PathMember,
     casing::Casing,
     shell_error::io::{self, IoError},
@@ -183,16 +183,17 @@ fn get_unicode_values(
     )?;
 
     if let Type::Record(_) = data.get_type() {
-        data.insert_data_at_cell_path(
-            &[PathMember::string(
-                "aliases".into(),
-                false,
-                Casing::Sensitive,
-                Span::unknown(),
-            )],
-            aliases,
-            Span::unknown(),
-        )?;
+        let mut record = data.into_record().unwrap();
+        let name_idx = record.index_of("name").expect("data without name column");
+        let num_cols = record.len();
+
+        let mut new_vals = Vec::with_capacity(num_cols + 1);
+
+        new_vals.extend(record.drain(..=name_idx));
+        new_vals.push(("aliases".into(), aliases));
+        new_vals.extend(record.drain(..));
+
+        data = Record::from_iter(new_vals).into_value(Span::unknown());
     } else {
         return Err(LabeledError::new("unexpected data")
             .with_label(
