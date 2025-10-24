@@ -7,7 +7,10 @@ pub struct Unicode;
 
 impl Plugin for Unicode {
     fn commands(&self) -> Vec<Box<dyn PluginCommand<Plugin = Self>>> {
-        vec![Box::new(commands::chars::UnicodeChars)]
+        vec![
+            Box::new(commands::chars::UnicodeChars),
+            Box::new(commands::ucd::index::build::UcdIndexBuild),
+        ]
     }
 
     fn version(&self) -> String {

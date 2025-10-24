@@ -3,9 +3,12 @@ use std::{
     io::{BufRead, BufReader, Cursor, Read},
 };
 
+use datafusion::{
+    common::JoinType,
+    prelude::{DataFrame, SessionContext},
+};
 use encoding_rs_io::DecodeReaderBytesBuilder;
 use nu_plugin::{EngineInterface, EvaluatedCall, PluginCommand};
-use nu_plugin_unicode_ucd::codegen::{name_aliases::NAME_ALIASES, unicode_data::UNICODE_DATA};
 use nu_protocol::{
     IntoValue, LabeledError, ListStream, PipelineData, Range, Record, ShellError, Signals,
     Signature, Span, SyntaxShape, Type, Value,
@@ -18,8 +21,14 @@ use tracing_subscriber::prelude::*;
 use crate::{
     Unicode,
     unicode::{
-        commands::chars::config::Config,
-        constants::{self, commands::chars::flags},
+        commands::{chars::config::Config, ucd::index::df::ucd_df},
+        constants::{
+            self,
+            commands::{
+                chars::flags,
+                ucd::index::dataframe::{self, table},
+            },
+        },
     },
 };
 
@@ -147,63 +156,33 @@ impl UnicodeChars {
     }
 }
 
-fn get_unicode_values(
-    ch: impl TryInto<u32, Error = impl Display>,
+async fn get_unicode_values(
+    ctx: &SessionContext,
+    call: &EvaluatedCall,
+    in_df: DataFrame,
     span: Span,
 ) -> Result<Value, LabeledError> {
-    let ch = ch
-        .try_into()
-        .map_err(|err| LabeledError::new("invalid char").with_label(err.to_string(), span))?;
+    let df_err = |err: datafusion::error::DataFusionError| {
+        LabeledError::new("error constructing dataframe")
+            .with_label(err.to_string(), Span::unknown())
+    };
 
-    let mut data = UNICODE_DATA
-        .get(&ch)
-        .copied()
-        .cloned()
-        .map(|data| data.into_value(Span::unknown()))
-        .unwrap_or(Value::nothing(Span::unknown()));
+    let unicode_data = ucd_df(ctx, call, dataframe::persist::path::UNICODE_DATA).await?;
 
-    if data.is_nothing() {
-        return Ok(data);
-    }
+    let records = in_df
+        .join(
+            unicode_data,
+            JoinType::Left,
+            &[table::unicode_data::fields::CODEPOINT],
+            &[table::unicode_data::fields::CODEPOINT],
+            None,
+        )
+        .map_err(df_err)?
+        .collect()
+        .await
+        .map_err(df_err)?;
 
-    let aliases = NAME_ALIASES.get(&ch).copied().map_or_else(
-        || Result::<_, LabeledError>::Ok(Value::nothing(Span::unknown())),
-        |aliases| {
-            let mut val = aliases.to_vec().into_value(Span::unknown());
-
-            val.remove_data_at_cell_path(&[PathMember::string(
-                "codepoint".into(),
-                false,
-                Casing::Sensitive,
-                Span::unknown(),
-            )])?;
-
-            Ok(val)
-        },
-    )?;
-
-    if let Type::Record(_) = data.get_type() {
-        let mut record = data.into_record().unwrap();
-        let name_idx = record.index_of("name").expect("data without name column");
-        let num_cols = record.len();
-
-        let mut new_vals = Vec::with_capacity(num_cols + 1);
-
-        new_vals.extend(record.drain(..=name_idx));
-        new_vals.push(("aliases".into(), aliases));
-        new_vals.extend(record.drain(..));
-
-        data = Record::from_iter(new_vals).into_value(Span::unknown());
-    } else {
-        return Err(LabeledError::new("unexpected data")
-            .with_label(
-                "Unicode data returned unexpected result. This is an internal error.",
-                data.span(),
-            )
-            .with_help(format!("{:?}", data)));
-    }
-
-    Ok(data)
+    todo!()
 }
 
 fn decode_bytes<'reader, 'cfg, R: Read + 'reader>(
@@ -283,14 +262,23 @@ impl PluginCommand for UnicodeChars {
     }
 
     fn signature(&self) -> nu_protocol::Signature {
-        Signature::build(self.name()).input_output_types(vec![
+        let mut sig = Signature::build(self.name()).input_output_types(vec![
             (Type::String, Type::Table([].into())),
             (Type::Binary, Type::Table([].into())),
             (Type::Int, Type::Table([].into())),
-            (Type::Range, Type::Table([].into())), (Type::List(Box::new(Type::Any)), Type::Table([].into())),
-        ])
-        .named(flags::ENCODING, SyntaxShape::String, "Encoding of the input bytes. By default, BOM sniffing occurs to detect the encoding; failing that, UTF-8 is assumed.", Some('e'))
-        .switch(flags::IGNORE_BOM, "Ignore the BOM, if present. By default, even if an encoding is specified, if a BOM is present, the encoding from the command line is ignored.", Some('b'))
+            (Type::Range, Type::Table([].into())),
+            (Type::List(Box::new(Type::Any)), Type::Table([].into())),
+        ]);
+
+        for flag in flags::FLAGS {
+            if let Some(ref shape) = flag.shape {
+                sig = sig.named(flag.name, shape.clone(), flag.desc, flag.short)
+            } else {
+                sig = sig.switch(flag.name, flag.desc, flag.short)
+            }
+        }
+
+        sig
     }
 
     fn examples(&self) -> Vec<nu_protocol::Example<'static>> {
